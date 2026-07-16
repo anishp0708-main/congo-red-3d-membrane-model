@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -16,9 +17,12 @@
       --red: #ff5468;
     }
 
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
-    html, body {
+    html,
+    body {
       margin: 0;
       width: 100%;
       height: 100%;
@@ -169,53 +173,6 @@
       line-height: 1.42;
     }
 
-    #hud {
-      right: 16px;
-      top: 16px;
-      width: min(350px, calc(100vw - 32px));
-      padding: 16px;
-    }
-
-    #hud h2 {
-      margin: 0 0 8px;
-      font-size: 16px;
-      letter-spacing: -0.02em;
-    }
-
-    .path-card {
-      display: grid;
-      grid-template-columns: 14px 1fr auto;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 0;
-      border-top: 1px solid rgba(255, 255, 255, 0.09);
-    }
-
-    .path-card:first-of-type { border-top: 0; }
-
-    .dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 999px;
-      box-shadow: 0 0 18px currentColor;
-    }
-
-    .dot.ac { color: #8a8f98; background: #20242b; }
-    .dot.chitosan { color: #7ee7cf; background: #7ee7cf; }
-
-    .path-card b { font-size: 13px; }
-
-    .path-card p {
-      margin: 2px 0 0;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .path-card .value {
-      font-weight: 800;
-      font-size: 18px;
-    }
-
     #footer-note {
       left: 16px;
       bottom: 16px;
@@ -226,7 +183,9 @@
       color: var(--muted);
     }
 
-    #footer-note strong { color: var(--text); }
+    #footer-note strong {
+      color: var(--text);
+    }
 
     #scene-status {
       position: fixed;
@@ -245,13 +204,13 @@
     }
 
     @media (max-width: 900px) {
-      #hud {
-        top: auto;
-        bottom: 16px;
-        right: 16px;
+      #footer-note {
+        display: none;
       }
-      #footer-note { display: none; }
-      #scene-status { display: none; }
+
+      #scene-status {
+        display: none;
+      }
     }
 
     @media (max-width: 700px) {
@@ -259,17 +218,18 @@
         width: calc(100vw - 32px);
         max-height: 48vh;
       }
-      #hud { display: none; }
     }
   </style>
 </head>
+
 <body>
   <div id="scene-root" aria-label="3D membrane flow scene"></div>
 
   <section id="controls" class="panel">
     <h1>Congo Red 3D Membrane Flow</h1>
     <p class="story">
-      Red dye particles and blue water molecules flow inside two transparent pipe paths. Water passes through both membranes, while more Congo Red is captured by chitosan, leaving a clearer outlet.
+      Red dye particles and blue water molecules flow inside two transparent pipe paths. Water passes through both
+      membranes, while more Congo Red is captured by chitosan, leaving a clearer outlet.
     </p>
 
     <div class="mode-box">
@@ -329,33 +289,14 @@
     </div>
   </section>
 
-  <section id="hud" class="panel">
-    <h2>Live outlet comparison</h2>
-    <div class="path-card">
-      <span class="dot ac"></span>
-      <div>
-        <b>Activated carbon path</b>
-        <p id="acLine">Outlet dye left: 30.9%</p>
-      </div>
-      <span class="value" id="acCe">10.8</span>
-    </div>
-    <div class="path-card">
-      <span class="dot chitosan"></span>
-      <div>
-        <b>Chitosan membrane path</b>
-        <p id="chitosanLine">Outlet dye left: 9.9%</p>
-      </div>
-      <span class="value" id="chitosanCe">3.5</span>
-    </div>
-    <p class="note" id="compareNote"></p>
-  </section>
-
   <section id="footer-note" class="panel">
-    <strong>Mouse:</strong> drag the middle scene to gently rotate it. Scroll to zoom. Blue spheres are water molecules; red spheres are Congo Red dye adsorbing onto the membranes, not being chemically destroyed.
+    <strong>Mouse:</strong> drag the middle scene to gently rotate it. Scroll to zoom. Blue spheres are water molecules;
+    red spheres are Congo Red dye adsorbing onto the membranes, not being chemically destroyed.
   </section>
 
   <div id="scene-status">3D pipe system loaded</div>
 
   <script type="module" src="/src/main.js"></script>
 </body>
+
 </html>
