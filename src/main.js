@@ -15,9 +15,22 @@ const state = {
   visualMode: "equilibrium"
 };
 
-// Remove the old top-right Live outlet comparison panel if index.html still has it.
+// Remove old top-right panel if it still exists in index.html.
 const oldHud = document.getElementById("hud");
 if (oldHud) oldHud.remove();
+
+const hideOldHudStyle = document.createElement("style");
+hideOldHudStyle.textContent = `
+  #hud,
+  #liveOutlet,
+  #live-outlet,
+  .live-outlet,
+  .live-outlet-comparison,
+  .outlet-comparison {
+    display: none !important;
+  }
+`;
+document.head.appendChild(hideOldHudStyle);
 
 let results = computeResults(state);
 let captureRates = { ac: 0.69, chitosan: 0.90 };
@@ -42,13 +55,17 @@ scene.add(modelRoot);
 const ambient = new THREE.AmbientLight(0xffffff, 1.15);
 scene.add(ambient);
 
-const glowLight = new THREE.PointLight(0x9dfcff, 2.4, 18);
+const glowLight = new THREE.PointLight(0x9dfcff, 3.2, 20);
 glowLight.position.set(1.8, 1.4, 6);
 scene.add(glowLight);
 
-const redLight = new THREE.PointLight(0xff4268, 2.2, 15);
+const redLight = new THREE.PointLight(0xff4268, 2.6, 16);
 redLight.position.set(-3.6, 0.8, 4);
 scene.add(redLight);
+
+const metalKeyLight = new THREE.DirectionalLight(0xffffff, 1.6);
+metalKeyLight.position.set(-3.5, 4.2, 6.5);
+scene.add(metalKeyLight);
 
 const pathPoints = {
   ac: [
@@ -78,6 +95,57 @@ const curves = {
   chitosan: new THREE.CatmullRomCurve3(pathPoints.chitosan, false, "centripetal", 0.25)
 };
 
+// Shared pipe/filter dimensions.
+// The filter insert is now the same diameter as the pipe, so it looks replaceable.
+const PIPE_RADIUS = 0.305;
+const WATER_RADIUS = 0.155;
+const OUTLET_WATER_RADIUS = 0.145;
+
+const FILTER_RADIUS = PIPE_RADIUS;
+const FILTER_LENGTH = 1.35;
+const COLLAR_RADIUS = PIPE_RADIUS + 0.048;
+
+// Dye sticks to the inner lining, not the center of the filter.
+const PIPE_INNER_WALL_RADIUS = PIPE_RADIUS * 0.72;
+
+const CAPTURE_T_RANGE = {
+  ac: [0.50, 0.66],
+  chitosan: [0.50, 0.66]
+};
+
+function getPipeWallAxes(pathType, t) {
+  const curve = curves[pathType];
+  const tangent = curve.getTangentAt(clamp(t, 0, 1)).normalize();
+
+  const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+  const binormal = new THREE.Vector3(0, 0, 1);
+
+  return { normal, binormal };
+}
+
+function liningPoint(pathType, t, angle, inset = 0) {
+  const curve = curves[pathType];
+  const base = curve.getPointAt(clamp(t, 0, 1));
+  const { normal, binormal } = getPipeWallAxes(pathType, t);
+
+  const radius = PIPE_INNER_WALL_RADIUS - inset;
+
+  base.addScaledVector(normal, Math.cos(angle) * radius);
+  base.addScaledVector(binormal, Math.sin(angle) * radius);
+
+  return base;
+}
+
+function visibleLiningAngle() {
+  // Mostly front-facing so viewers can see adsorption,
+  // but some particles still spread around the full inner wall.
+  if (Math.random() < 0.72) {
+    return Math.PI / 2 + (Math.random() - 0.5) * 1.55;
+  }
+
+  return Math.random() * Math.PI * 2;
+}
+
 const inletCurve = new THREE.CatmullRomCurve3([
   new THREE.Vector3(-4.8, 0.0, 0.0),
   new THREE.Vector3(-3.95, 0.0, 0.0),
@@ -97,32 +165,61 @@ const chitosanOutletCurve = new THREE.CatmullRomCurve3([
 ]);
 
 const materials = {
-  pipe: new THREE.MeshBasicMaterial({
-    color: 0xa9efff,
+  pipe: new THREE.MeshPhysicalMaterial({
+    color: 0xd8fbff,
     transparent: true,
-    opacity: 0.42,
+    opacity: 0.28,
+    roughness: 0.06,
+    metalness: 0.0,
+    transmission: 0.45,
+    thickness: 0.35,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.05,
     side: THREE.DoubleSide,
     depthWrite: false
   }),
-  pipeRim: new THREE.MeshBasicMaterial({
-    color: 0xe8fdff,
+
+  pipeInnerGlow: new THREE.MeshBasicMaterial({
+    color: 0xbff7ff,
     transparent: true,
-    opacity: 0.56,
+    opacity: 0.16,
     side: THREE.DoubleSide,
     depthWrite: false
   }),
+
+  pipeHighlight: new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.34,
+    depthWrite: false
+  }),
+
+  metal: new THREE.MeshStandardMaterial({
+    color: 0xc8d2dc,
+    roughness: 0.18,
+    metalness: 0.9
+  }),
+
+  darkMetal: new THREE.MeshStandardMaterial({
+    color: 0x2b3138,
+    roughness: 0.22,
+    metalness: 0.85
+  }),
+
   inletWater: new THREE.MeshBasicMaterial({
     color: 0xff2848,
     transparent: true,
-    opacity: 0.74,
+    opacity: 0.76,
     depthWrite: false
   }),
+
   acWater: new THREE.MeshBasicMaterial({
     color: 0xff6d78,
     transparent: true,
     opacity: 0.64,
     depthWrite: false
   }),
+
   chitosanWater: new THREE.MeshBasicMaterial({
     color: 0xcff8ff,
     transparent: true,
@@ -140,57 +237,173 @@ function tube(curve, radius, material, segments = 120, radial = 24) {
   return mesh;
 }
 
-tube(curves.ac, 0.25, materials.pipe, 180, 28);
-tube(curves.chitosan, 0.25, materials.pipe, 180, 28);
-tube(curves.ac, 0.275, materials.pipeRim, 180, 10);
-tube(curves.chitosan, 0.275, materials.pipeRim, 180, 10);
+function addTubeHighlight(curve, radius, yOffsetHint = 0) {
+  const points = curve.getPoints(100);
+  const highlightPoints = points.map((point) => {
+    const lifted = point.clone();
+    lifted.y += yOffsetHint > 0 ? 0.055 : -0.055;
+    lifted.z += 0.16;
+    return lifted;
+  });
 
-const inletWater = tube(inletCurve, 0.155, materials.inletWater, 70, 20);
-const acOutletWater = tube(acOutletCurve, 0.145, materials.acWater, 70, 20);
-const chitosanOutletWater = tube(chitosanOutletCurve, 0.145, materials.chitosanWater, 70, 20);
-
-function addPipeRing(x, y) {
-  const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.29, 0.024, 10, 48),
-    new THREE.MeshBasicMaterial({ color: 0xe5fbff, transparent: true, opacity: 0.9 })
+  const highlightCurve = new THREE.CatmullRomCurve3(
+    highlightPoints,
+    false,
+    "centripetal",
+    0.25
   );
-  ring.position.set(x, y, 0.05);
-  ring.rotation.y = Math.PI / 2;
-  modelRoot.add(ring);
-  return ring;
+
+  const highlight = new THREE.Mesh(
+    new THREE.TubeGeometry(highlightCurve, 100, 0.018, 8, false),
+    materials.pipeHighlight
+  );
+
+  modelRoot.add(highlight);
+  return highlight;
 }
 
+// Transparent pipes.
+tube(curves.ac, PIPE_RADIUS, materials.pipe, 180, 32);
+tube(curves.chitosan, PIPE_RADIUS, materials.pipe, 180, 32);
+
+// Inner glow so the water remains visible through the pipe.
+tube(curves.ac, PIPE_RADIUS * 0.82, materials.pipeInnerGlow, 180, 20);
+tube(curves.chitosan, PIPE_RADIUS * 0.82, materials.pipeInnerGlow, 180, 20);
+
+// White highlight lines make the pipes look polished.
+addTubeHighlight(curves.ac, PIPE_RADIUS + 0.022, 1.18);
+addTubeHighlight(curves.chitosan, PIPE_RADIUS + 0.022, -1.18);
+
+// Flowing water streams.
+const inletWater = tube(inletCurve, WATER_RADIUS, materials.inletWater, 70, 20);
+const acOutletWater = tube(acOutletCurve, OUTLET_WATER_RADIUS, materials.acWater, 70, 20);
+const chitosanOutletWater = tube(
+  chitosanOutletCurve,
+  OUTLET_WATER_RADIUS,
+  materials.chitosanWater,
+  70,
+  20
+);
+
+function addPipeRing(x, y, radius = COLLAR_RADIUS) {
+  const group = new THREE.Group();
+
+  const outerRing = new THREE.Mesh(
+    new THREE.TorusGeometry(radius, 0.035, 16, 72),
+    materials.metal
+  );
+  outerRing.rotation.y = Math.PI / 2;
+  group.add(outerRing);
+
+  const innerDarkRing = new THREE.Mesh(
+    new THREE.TorusGeometry(radius * 0.92, 0.012, 12, 56),
+    materials.darkMetal
+  );
+  innerDarkRing.rotation.y = Math.PI / 2;
+  innerDarkRing.position.z = 0.012;
+  group.add(innerDarkRing);
+
+  const shine = new THREE.Mesh(
+    new THREE.TorusGeometry(radius * 1.04, 0.006, 8, 72),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.72
+    })
+  );
+  shine.rotation.y = Math.PI / 2;
+  shine.position.z = 0.035;
+  group.add(shine);
+
+  group.position.set(x, y, 0.08);
+  modelRoot.add(group);
+
+  return group;
+}
+
+// Metallic pipe collars and replaceable filter collars.
+addPipeRing(-4.8, 0);
 addPipeRing(-3.18, 0);
+
+addPipeRing(-1.35, 1.25);
+addPipeRing(0.55, 1.25, COLLAR_RADIUS + 0.02);
+addPipeRing(1.55, 1.25);
 addPipeRing(4.7, 1.25);
+
+addPipeRing(-1.35, -1.25);
+addPipeRing(0.55, -1.25, COLLAR_RADIUS + 0.02);
+addPipeRing(1.55, -1.25);
 addPipeRing(4.7, -1.25);
 
 function makeCartridge(label, color, y, options = {}) {
   const group = new THREE.Group();
-  group.position.set(0.55, y, 0.18);
+  group.position.set(0.55, y, 0.16);
 
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.48, 0.48, 1.35, 48, 1, true),
+  const radius = options.radius ?? FILTER_RADIUS;
+  const length = options.length ?? FILTER_LENGTH;
+
+  // Clear outer sleeve: same diameter as pipe.
+  // This makes the filter look like a replaceable pipe segment.
+  const sleeve = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, length, 64, 1, true),
+    new THREE.MeshPhysicalMaterial({
+      color: 0xd8fbff,
+      transparent: true,
+      opacity: 0.24,
+      roughness: 0.08,
+      metalness: 0.0,
+      transmission: 0.38,
+      thickness: 0.28,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.05,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    })
+  );
+
+  sleeve.rotation.z = Math.PI / 2;
+  group.add(sleeve);
+
+  // Colored inner lining: the actual active membrane/filter surface.
+  const lining = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      PIPE_INNER_WALL_RADIUS,
+      PIPE_INNER_WALL_RADIUS,
+      length * 0.92,
+      64,
+      1,
+      true
+    ),
     new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: options.opacity ?? 0.78,
-      side: THREE.DoubleSide
+      opacity: options.liningOpacity ?? 0.42,
+      side: THREE.DoubleSide,
+      depthWrite: false
     })
   );
-  body.rotation.z = Math.PI / 2;
-  group.add(body);
 
-  const capMat = new THREE.MeshBasicMaterial({
-    color: options.ringColor ?? 0xffffff,
-    transparent: true,
-    opacity: 0.96
-  });
+  lining.rotation.z = Math.PI / 2;
+  group.add(lining);
 
-  for (const x of [-0.675, 0.675]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.49, 0.045, 12, 64), capMat);
-    ring.position.x = x;
-    ring.rotation.y = Math.PI / 2;
-    group.add(ring);
+  // Metallic collars at both ends.
+  for (const x of [-length / 2, length / 2]) {
+    const collar = new THREE.Mesh(
+      new THREE.TorusGeometry(COLLAR_RADIUS, 0.035, 16, 72),
+      materials.metal
+    );
+    collar.position.x = x;
+    collar.rotation.y = Math.PI / 2;
+    group.add(collar);
+
+    const innerShadow = new THREE.Mesh(
+      new THREE.TorusGeometry(COLLAR_RADIUS * 0.91, 0.012, 12, 56),
+      materials.darkMetal
+    );
+    innerShadow.position.x = x;
+    innerShadow.position.z = 0.012;
+    innerShadow.rotation.y = Math.PI / 2;
+    group.add(innerShadow);
   }
 
   const labelSprite = textSprite(label, options.labelColor ?? "#ffffff");
@@ -202,40 +415,40 @@ function makeCartridge(label, color, y, options = {}) {
   return group;
 }
 
-makeCartridge("Activated carbon", 0x14171d, 1.25, {
-  opacity: 0.92,
-  ringColor: 0x9ba3ae,
+makeCartridge("Activated carbon insert", 0x15191f, 1.25, {
+  liningOpacity: 0.50,
   labelColor: "#e8ecf4"
 });
 
-makeCartridge("Chitosan membrane", 0xf5deb2, -1.25, {
-  opacity: 0.82,
-  ringColor: 0xf1fff7,
+makeCartridge("Chitosan membrane insert", 0xf5deb2, -1.25, {
+  liningOpacity: 0.48,
   labelColor: "#bffff1"
 });
 
 function addAcPellets() {
-  const geo = new THREE.SphereGeometry(0.045, 10, 10);
+  const geo = new THREE.SphereGeometry(0.040, 10, 10);
   const colors = [0x050609, 0x161a20, 0x29313b];
 
-  for (let i = 0; i < 95; i++) {
+  // Activated carbon is shown as a rough lining on the inside wall.
+  for (let i = 0; i < 115; i++) {
     const pellet = new THREE.Mesh(
       geo,
       new THREE.MeshBasicMaterial({
         color: colors[i % colors.length],
         transparent: true,
-        opacity: 0.94
+        opacity: 0.90,
+        depthWrite: false
       })
     );
 
-    pellet.position.set(
-      0.55 + (Math.random() - 0.5) * 1.06,
-      1.25 + (Math.random() - 0.5) * 0.34,
-      (Math.random() - 0.5) * 0.22
-    );
+    const t = 0.505 + Math.random() * 0.15;
+    const angle = visibleLiningAngle();
 
-    const s = 0.6 + Math.random() * 1.35;
+    pellet.position.copy(liningPoint("ac", t, angle, 0.035));
+
+    const s = 0.55 + Math.random() * 1.15;
     pellet.scale.setScalar(s);
+
     modelRoot.add(pellet);
   }
 }
@@ -246,46 +459,47 @@ function addChitosanSitesAndFibers() {
   const fiberMat = new THREE.MeshBasicMaterial({
     color: 0xffefc9,
     transparent: true,
-    opacity: 0.78
+    opacity: 0.84,
+    depthWrite: false
   });
 
-  for (let i = 0; i < 38; i++) {
-    const yBase = -1.25 + (Math.random() - 0.5) * 0.30;
-    const zBase = (Math.random() - 0.5) * 0.20;
+  // Chitosan fibers are drawn along the pipe lining.
+  for (let i = 0; i < 58; i++) {
+    const t1 = 0.505 + Math.random() * 0.13;
+    const t2 = clamp(t1 + 0.018 + Math.random() * 0.035, 0.505, 0.665);
+    const angle = visibleLiningAngle();
+
     const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-0.06 + Math.random() * 0.16, yBase, zBase),
-      new THREE.Vector3(
-        0.35 + Math.random() * 0.15,
-        yBase + (Math.random() - 0.5) * 0.18,
-        zBase
-      ),
-      new THREE.Vector3(
-        0.75 + Math.random() * 0.16,
-        yBase + (Math.random() - 0.5) * 0.18,
-        zBase
-      )
+      liningPoint("chitosan", t1, angle, 0.035),
+      liningPoint("chitosan", (t1 + t2) / 2, angle + 0.18, 0.035),
+      liningPoint("chitosan", t2, angle - 0.08, 0.035)
     ]);
 
-    modelRoot.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 14, 0.012, 6, false), fiberMat));
+    const fiber = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 12, 0.010, 6, false),
+      fiberMat
+    );
+
+    modelRoot.add(fiber);
   }
 
-  const siteGeo = new THREE.SphereGeometry(0.035, 12, 12);
+  const siteGeo = new THREE.SphereGeometry(0.030, 12, 12);
   const siteMat = new THREE.MeshBasicMaterial({
     color: 0x7fffd4,
     transparent: true,
-    opacity: 0.96
+    opacity: 0.96,
+    depthWrite: false
   });
 
-  for (let i = 0; i < 70; i++) {
+  // Positive binding sites sit on the inner lining.
+  for (let i = 0; i < 90; i++) {
+    const t = 0.505 + Math.random() * 0.15;
+    const angle = visibleLiningAngle();
+
     const site = new THREE.Mesh(siteGeo, siteMat);
-
-    site.position.set(
-      0.55 + (Math.random() - 0.5) * 1.05,
-      -1.25 + (Math.random() - 0.5) * 0.34,
-      (Math.random() - 0.5) * 0.22
-    );
-
+    site.position.copy(liningPoint("chitosan", t, angle, 0.050));
     site.userData.phase = Math.random() * Math.PI * 2;
+
     bindingSites.push(site);
     modelRoot.add(site);
   }
@@ -371,7 +585,7 @@ const dyeMaterial = new THREE.MeshBasicMaterial({
 const capturedDyeMaterial = new THREE.MeshBasicMaterial({
   color: 0xd90036,
   transparent: true,
-  opacity: 0.88,
+  opacity: 0.90,
   depthWrite: false
 });
 
@@ -426,24 +640,27 @@ function resetWaterParticle(particle, randomize = false) {
   particle.visible = true;
 }
 
-function randomCapturePoint(pathType) {
-  const centerY = pathType === "ac" ? 1.25 : -1.25;
+function randomCapturePoint(pathType, nearT = null) {
+  const range = CAPTURE_T_RANGE[pathType];
 
-  return new THREE.Vector3(
-    0.55 + (Math.random() - 0.5) * 1.06,
-    centerY + (Math.random() - 0.5) * 0.28,
-    (Math.random() - 0.5) * 0.22
-  );
+  const t =
+    nearT === null
+      ? range[0] + Math.random() * (range[1] - range[0])
+      : clamp(nearT + (Math.random() - 0.5) * 0.035, range[0], range[1]);
+
+  const angle = visibleLiningAngle();
+
+  // Captured dye sits directly on the active lining.
+  return liningPoint(pathType, t, angle, 0.018);
 }
 
-function isInsideCaptureZone(pathType, pos) {
-  const centerY = pathType === "ac" ? 1.25 : -1.25;
+function isInsideCaptureZone(pathType, pos, t) {
+  const range = CAPTURE_T_RANGE[pathType];
 
   return (
-    pos.x > -0.08 &&
-    pos.x < 1.15 &&
-    Math.abs(pos.y - centerY) < 0.28 &&
-    Math.abs(pos.z) < 0.22
+    t > range[0] &&
+    t < range[1] &&
+    Math.abs(pos.z) < PIPE_RADIUS
   );
 }
 
@@ -551,6 +768,11 @@ function getVisualMetrics() {
   };
 }
 
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
 function updateSimulation() {
   results = computeResults(state);
   const visual = getVisualMetrics();
@@ -564,21 +786,21 @@ function updateSimulation() {
   materials.acWater.opacity = 0.24 + 0.62 * clamp(visual.acRelative, 0, 1);
   materials.chitosanWater.opacity = 0.18 + 0.46 * clamp(visual.chitosanRelative, 0, 1);
 
-  document.getElementById("metricChitosan").textContent = formatPct(visual.chitosanRemoval);
-  document.getElementById("metricChitosanSub").textContent = visual.chitosanLabel;
-  document.getElementById("metricAc").textContent = formatPct(results.ac.removalEq);
-  document.getElementById("metricFlow").textContent = formatPct(results.removalFlow);
-  document.getElementById("metricFlowSub").textContent =
-    `${formatPct(results.f * 100, 0)} of chitosan equilibrium reached`;
-  document.getElementById("metricFold").textContent = `${results.foldGain.toFixed(1)}x`;
+  setText("metricChitosan", formatPct(visual.chitosanRemoval));
+  setText("metricChitosanSub", visual.chitosanLabel);
+  setText("metricAc", formatPct(results.ac.removalEq));
+  setText("metricFlow", formatPct(results.removalFlow));
+  setText("metricFlowSub", `${formatPct(results.f * 100, 0)} of chitosan equilibrium reached`);
+  setText("metricFold", `${results.foldGain.toFixed(1)}x`);
 
-  document.getElementById("modeNote").textContent =
+  setText(
+    "modeNote",
     state.visualMode === "equilibrium"
       ? "Best for visually comparing capacity and final clarity. This is why chitosan looks stronger in the pipe scene."
-      : "Shows the chitosan single-pass result from pipe contact time. AC is still only a benchmark because no matched AC rate constant is supplied.";
+      : "Shows the chitosan single-pass result from pipe contact time. AC is still only a benchmark because no matched AC rate constant is supplied."
+  );
 
-  document.getElementById("scene-status").textContent =
-    "3D pipe system loaded - drag scene to tilt";
+  setText("scene-status", "3D pipe system loaded - drag scene to tilt");
 
   for (const p of particles) {
     if (!p.userData.stuck && Math.random() < 0.06) {
@@ -593,6 +815,8 @@ function bindInputs() {
 
   function setValue(key, rawValue, source) {
     const allForKey = document.querySelectorAll(`[data-key="${key}"]`);
+    if (!allForKey.length) return;
+
     const min = Number(allForKey[0].min);
     const max = Number(allForKey[0].max);
     const value = clamp(Number(rawValue), min, max);
@@ -624,10 +848,13 @@ function bindInputs() {
     });
   });
 
-  document.getElementById("visualMode").addEventListener("change", (event) => {
-    state.visualMode = event.target.value;
-    updateSimulation();
-  });
+  const visualMode = document.getElementById("visualMode");
+  if (visualMode) {
+    visualMode.addEventListener("change", (event) => {
+      state.visualMode = event.target.value;
+      updateSimulation();
+    });
+  }
 }
 
 bindInputs();
@@ -711,7 +938,7 @@ function updateParticle(particle, dt, elapsed) {
 
   if (data.stuck) {
     const age = elapsed - data.stuckAt;
-    particle.scale.setScalar(0.95 + Math.sin(elapsed * 4.5 + data.capturePoint.x) * 0.07);
+    particle.scale.setScalar(0.72 + Math.sin(elapsed * 4.5 + data.capturePoint.x) * 0.05);
 
     if (age > 7 + Math.random() * 1.2) {
       resetParticle(particle, false);
@@ -740,17 +967,22 @@ function updateParticle(particle, dt, elapsed) {
     elapsed * 6.0 + data.t * 18 + (data.pathType === "ac" ? 2 : 4)
   );
 
+  // Free-moving dye stays inside the pipe core.
   pos.addScaledVector(side, swirlA * 0.075);
   pos.z = swirlB * 0.075;
 
   particle.position.copy(pos);
 
-  if (data.willCapture && isInsideCaptureZone(data.pathType, pos)) {
+  if (data.willCapture && isInsideCaptureZone(data.pathType, pos, data.t)) {
     data.stuck = true;
     data.stuckAt = elapsed;
+
+    // Adsorption happens on the filter lining, not in the center.
+    data.capturePoint = randomCapturePoint(data.pathType, data.t);
     particle.position.copy(data.capturePoint);
+
     particle.material = capturedDyeMaterial;
-    particle.scale.setScalar(0.74 + Math.random() * 0.24);
+    particle.scale.setScalar(0.58 + Math.random() * 0.18);
   }
 }
 
@@ -772,6 +1004,7 @@ function updateWaterParticle(particle, dt, elapsed) {
   const swirlA = Math.sin(elapsed * 8.5 + data.t * 32 + data.phase);
   const swirlB = Math.cos(elapsed * 7.4 + data.t * 26 + data.phase);
 
+  // Water molecules pass through easily and remain inside the pipe.
   pos.addScaledVector(side, swirlA * 0.105);
   pos.z = swirlB * 0.105;
 
