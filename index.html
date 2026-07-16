@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Congo Red 3D Membrane Flow Model</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --panel: rgba(5, 12, 24, 0.72);
+      --panel-strong: rgba(8, 20, 38, 0.91);
+      --border: rgba(160, 220, 255, 0.24);
+      --text: #f1fbff;
+      --muted: #b8cad8;
+      --accent: #7ee7cf;
+      --red: #ff5468;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 55% 30%, rgba(26, 72, 112, 0.68) 0%, rgba(7, 17, 31, 0.96) 45%, #03070d 100%);
+      color: var(--text);
+    }
+
+    #scene-root {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: auto;
+    }
+
+    #scene-root canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .panel {
+      position: fixed;
+      z-index: 10;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(12, 28, 52, 0.86), rgba(5, 12, 24, 0.76));
+      box-shadow: 0 18px 55px rgba(0, 0, 0, 0.34);
+      backdrop-filter: blur(14px);
+      border-radius: 22px;
+    }
+
+    #controls {
+      top: 16px;
+      left: 16px;
+      width: min(390px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      padding: 18px;
+    }
+
+    #controls h1 {
+      margin: 0 0 6px;
+      font-size: 20px;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+    }
+
+    #controls .story {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .mode-box {
+      margin: 12px 0 14px;
+      padding: 12px;
+      border: 1px solid rgba(126, 231, 207, 0.24);
+      border-radius: 16px;
+      background: rgba(126, 231, 207, 0.06);
+    }
+
+    .mode-box label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    select,
+    input[type="number"] {
+      width: 100%;
+      border: 1px solid rgba(178, 226, 255, 0.24);
+      border-radius: 12px;
+      color: var(--text);
+      background: rgba(3, 9, 18, 0.74);
+      padding: 9px 10px;
+      outline: none;
+    }
+
+    .control {
+      display: grid;
+      grid-template-columns: 1fr 92px;
+      gap: 8px 12px;
+      align-items: center;
+      margin: 12px 0;
+    }
+
+    .control label {
+      font-size: 13px;
+      color: #e6f7ff;
+    }
+
+    .control span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    input[type="range"] {
+      grid-column: 1 / -1;
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      padding: 10px;
+      min-height: 82px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .metric small {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 5px;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .metric em {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-style: normal;
+      line-height: 1.25;
+    }
+
+    .note {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.42;
+    }
+
+    #hud {
+      right: 16px;
+      top: 16px;
+      width: min(350px, calc(100vw - 32px));
+      padding: 16px;
+    }
+
+    #hud h2 {
+      margin: 0 0 8px;
+      font-size: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .path-card {
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.09);
+    }
+
+    .path-card:first-of-type { border-top: 0; }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      box-shadow: 0 0 18px currentColor;
+    }
+
+    .dot.ac { color: #8a8f98; background: #20242b; }
+    .dot.chitosan { color: #7ee7cf; background: #7ee7cf; }
+
+    .path-card b { font-size: 13px; }
+
+    .path-card p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .path-card .value {
+      font-weight: 800;
+      font-size: 18px;
+    }
+
+    #footer-note {
+      left: 16px;
+      bottom: 16px;
+      width: min(560px, calc(100vw - 32px));
+      padding: 12px 14px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    #footer-note strong { color: var(--text); }
+
+    #scene-status {
+      position: fixed;
+      z-index: 12;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(126, 231, 207, 0.24);
+      background: rgba(5, 12, 24, 0.62);
+      color: #cffff4;
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      pointer-events: none;
+    }
+
+    @media (max-width: 900px) {
+      #hud {
+        top: auto;
+        bottom: 16px;
+        right: 16px;
+      }
+      #footer-note { display: none; }
+      #scene-status { display: none; }
+    }
+
+    @media (max-width: 700px) {
+      #controls {
+        width: calc(100vw - 32px);
+        max-height: 48vh;
+      }
+      #hud { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="scene-root" aria-label="3D membrane flow scene"></div>
+
+  <section id="controls" class="panel">
+    <h1>Congo Red 3D Membrane Flow</h1>
+    <p class="story">
+      Red dye particles and blue water molecules flow inside two transparent pipe paths. Water passes through both membranes, while more Congo Red is captured by chitosan, leaving a clearer outlet.
+    </p>
+
+    <div class="mode-box">
+      <label for="visualMode">3D comparison mode</label>
+      <select id="visualMode">
+        <option value="equilibrium" selected>Equilibrium ceiling: chitosan vs activated carbon</option>
+        <option value="flow">Flow view: chitosan single-pass vs AC benchmark</option>
+      </select>
+      <p class="note" id="modeNote"></p>
+    </div>
+
+    <div class="control">
+      <label for="c0Range">Initial Congo Red <span>C0, mg/L</span></label>
+      <input id="c0Number" data-key="C0" type="number" min="5" max="300" step="1" value="35" />
+      <input id="c0Range" data-key="C0" type="range" min="5" max="300" step="1" value="35" />
+    </div>
+
+    <div class="control">
+      <label for="vRange">Water volume <span>V, L</span></label>
+      <input id="vNumber" data-key="V" type="number" min="0.1" max="5" step="0.1" value="1" />
+      <input id="vRange" data-key="V" type="range" min="0.1" max="5" step="0.1" value="1" />
+    </div>
+
+    <div class="control">
+      <label for="mRange">Membrane mass <span>m, g</span></label>
+      <input id="mNumber" data-key="m" type="number" min="0.05" max="5" step="0.05" value="0.5" />
+      <input id="mRange" data-key="m" type="range" min="0.05" max="5" step="0.05" value="0.5" />
+    </div>
+
+    <div class="control">
+      <label for="tauRange">Pipe contact time <span>tau, seconds</span></label>
+      <input id="tauNumber" data-key="tau" type="number" min="1" max="600" step="1" value="30" />
+      <input id="tauRange" data-key="tau" type="range" min="1" max="600" step="1" value="30" />
+    </div>
+
+    <div class="metrics">
+      <div class="metric">
+        <small>Chitosan captured</small>
+        <strong id="metricChitosan">90.1%</strong>
+        <em id="metricChitosanSub">equilibrium comparison</em>
+      </div>
+      <div class="metric">
+        <small>AC captured</small>
+        <strong id="metricAc">69.1%</strong>
+        <em>equilibrium benchmark</em>
+      </div>
+      <div class="metric">
+        <small>Single-pass chitosan</small>
+        <strong id="metricFlow">55.1%</strong>
+        <em id="metricFlowSub">tau-limited removal</em>
+      </div>
+      <div class="metric">
+        <small>Light recovery</small>
+        <strong id="metricFold">2.2x</strong>
+        <em>from chitosan flow outlet</em>
+      </div>
+    </div>
+  </section>
+
+  <section id="hud" class="panel">
+    <h2>Live outlet comparison</h2>
+    <div class="path-card">
+      <span class="dot ac"></span>
+      <div>
+        <b>Activated carbon path</b>
+        <p id="acLine">Outlet dye left: 30.9%</p>
+      </div>
+      <span class="value" id="acCe">10.8</span>
+    </div>
+    <div class="path-card">
+      <span class="dot chitosan"></span>
+      <div>
+        <b>Chitosan membrane path</b>
+        <p id="chitosanLine">Outlet dye left: 9.9%</p>
+      </div>
+      <span class="value" id="chitosanCe">3.5</span>
+    </div>
+    <p class="note" id="compareNote"></p>
+  </section>
+
+  <section id="footer-note" class="panel">
+    <strong>Mouse:</strong> drag the middle scene to gently rotate it. Scroll to zoom. Blue spheres are water molecules; red spheres are Congo Red dye adsorbing onto the membranes, not being chemically destroyed.
+  </section>
+
+  <div id="scene-status">3D pipe system loaded</div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
